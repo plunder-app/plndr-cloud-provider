@@ -3,6 +3,7 @@ package plndrcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -18,7 +19,7 @@ type plndrServices struct {
 
 type services struct {
 	Vip         string `json:"vip"`
-	UID         string `json:"uid:`
+	UID         string `json:"uid"`
 	ServiceName string `json:"serviceName"`
 }
 
@@ -53,7 +54,27 @@ func (plb *plndrLoadBalancerManager) EnsureLoadBalancerDeleted(ctx context.Conte
 }
 
 func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
-	return nil, false, nil
+	cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
+	if err != nil {
+		return nil, false, fmt.Errorf("Unable to find configMap [%s]", plb.configMap)
+	}
+	var svcs plndrServices
+	d := cm.Data["services"]
+	json.Unmarshal([]byte(d), &svcs)
+
+	for x := range svcs.Services {
+		if svcs.Services[x].UID == string(service.UID) {
+			return &v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{
+					{
+						IP: svcs.Services[x].Vip,
+					},
+				},
+			}, true, nil
+		}
+	}
+
+	return nil, false, fmt.Errorf("Unable to find service [%s]", service.Name)
 }
 
 // GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
@@ -65,7 +86,40 @@ func (plb *plndrLoadBalancerManager) GetLoadBalancerName(_ context.Context, clus
 func getDefaultLoadBalancerName(service *v1.Service) string {
 	return cloudprovider.DefaultLoadBalancerName(service)
 }
+
 func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) error {
+	klog.Infof("syncing (deleting) service '%s' (%s)", service.Name, service.UID)
+	//	return nil, fmt.Errorf("BOOM, no kube-vip for you ..")
+
+	cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("Unable to find configMap [%s]", plb.configMap)
+	}
+	var oldServices, newServices plndrServices
+	d := cm.Data["services"]
+	json.Unmarshal([]byte(d), &oldServices)
+
+	var found bool
+	for x := range oldServices.Services {
+		if oldServices.Services[x].UID != string(service.UID) {
+			newServices.Services = append(newServices.Services, oldServices.Services[x])
+		} else {
+			found = true
+		}
+	}
+
+	b, _ := json.Marshal(newServices)
+
+	cm.Data["services"] = string(b)
+	_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
+
+	if err != nil {
+		klog.Errorf("%v", err)
+	}
+
+	if found != true {
+		return fmt.Errorf("Unable to find service [%s] in configMap [%s]", service.Name, plb.configMap)
+	}
 
 	return nil
 }
@@ -80,13 +134,14 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Can't find config Map %s, creating new Map", plb.configMap)
-		cm := v1.ConfigMap{
+		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      plb.configMap,
 				Namespace: plb.namespace,
 			},
 		}
-		_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(&cm)
+		cm.Data = map[string]string{}
+		cm, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(cm)
 		if err != nil {
 			klog.Errorf("%v", err)
 		}
@@ -95,11 +150,24 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 
 	if cm.Data == nil {
 		cm.Data = map[string]string{}
-		cm.Data["services"] = svc.updateServices(vip, service.Name, string(service.UID))
 
+	}
+	b := cm.Data["services"]
+	json.Unmarshal([]byte(b), &svc)
+
+	var found bool
+	for x := range svc.Services {
+		if svc.Services[x].UID == string(service.UID) {
+			svc.Services[x].Vip = vip
+			svc.Services[x].ServiceName = cm.Name
+			found = true
+		}
+	}
+
+	if found == true {
+		b, _ := json.Marshal(svc)
+		cm.Data["services"] = string(b)
 	} else {
-		b := cm.Data["services"]
-		json.Unmarshal([]byte(b), &svc)
 		cm.Data["services"] = svc.updateServices(vip, service.Name, string(service.UID))
 	}
 
