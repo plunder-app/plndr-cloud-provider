@@ -22,6 +22,7 @@ require (
 	go.etcd.io/bbolt v1.3.2 // indirect
 	golang.org/x/lint v0.0.0-20190409202823-959b441ac422
 	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
+	google.golang.org/appengine v1.5.0
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.42.0 // indirect
 	k8s.io/api v0.0.0
