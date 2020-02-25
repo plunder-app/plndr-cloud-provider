@@ -41,6 +41,7 @@ func main() {
 	command := app.NewCloudControllerManagerCommand()
 
 	command.Flags().BoolVar(&plndrcp.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+	command.Flags().StringVar(&plndrcp.CIDR, "cidr", "", "Virtual IP Address range (192.168.0.70/30)")
 
 	// Set static flags for which we know the values.
 	command.Flags().VisitAll(func(fl *pflag.Flag) {
