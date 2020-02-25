@@ -2,15 +2,15 @@ package plndrcp
 
 import (
 	"context"
-	"encoding/json"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+//TODO - this needs replacing with the IPAM code
+const vip = "192.168.0.76"
 
 type plndrServices struct {
 	Services []services `json:"services"`
@@ -18,7 +18,7 @@ type plndrServices struct {
 
 type services struct {
 	Vip         string `json:"vip"`
-	UID         string `json:"uid:`
+	UID         string `json:"uid"`
 	ServiceName string `json:"serviceName"`
 }
 
@@ -47,12 +47,32 @@ func (plb *plndrLoadBalancerManager) UpdateLoadBalancer(ctx context.Context, clu
 }
 
 func (plb *plndrLoadBalancerManager) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *v1.Service) error {
-	klog.Infof("Deleting service '%s' (%s)", service.Name, service.UID)
-
 	return plb.deleteLoadBalancer(service)
 }
 
 func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
+	// Get the err to be updated
+	cm, err := plb.GetConfigMap()
+	if err != nil {
+		return nil, true, nil
+	}
+	// Find the services configuraiton in the configMap
+	svc, err := plb.GetServices(cm)
+	if err != nil {
+		return nil, false, err
+	}
+
+	for x := range svc.Services {
+		if svc.Services[x].UID == string(service.UID) {
+			return &v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{
+					{
+						IP: svc.Services[x].Vip,
+					},
+				},
+			}, true, nil
+		}
+	}
 	return nil, false, nil
 }
 
@@ -66,52 +86,101 @@ func getDefaultLoadBalancerName(service *v1.Service) string {
 	return cloudprovider.DefaultLoadBalancerName(service)
 }
 func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) error {
+	klog.Infof("deleting service '%s' (%s)", service.Name, service.UID)
 
-	return nil
+	// Get the err to be updated
+	cm, err := plb.GetConfigMap()
+	if err != nil {
+		klog.Errorf("The configMap [%s] doensn't exist", PlunderConfigMap)
+		return nil
+	}
+	// Find the services configuraiton in the configMap
+	svc, err := plb.GetServices(cm)
+	if err != nil {
+		klog.Errorf("The service [%s] in configMap [%s] doensn't exist", service.Name, PlunderConfigMap)
+		return nil
+	}
+
+	// Update the services configuration, by removing the  service
+	updatedSvc := svc.delServiceFromUID(string(service.UID))
+
+	// Update the configMap
+	_, err = plb.UpdateConfigMap(cm, updatedSvc)
+	return err
 }
 
 func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.LoadBalancerStatus, error) {
-	var vip string
-	vip = "192.168.0.76"
+
 	// This function reconciles the load balancer state
 	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
-	//	return nil, fmt.Errorf("BOOM, no kube-vip for you ..")
 
-	cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
+	// Get the err to be updated
+	cm, err := plb.GetConfigMap()
 	if err != nil {
-		klog.Errorf("Can't find config Map %s, creating new Map", plb.configMap)
-		cm := v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      plb.configMap,
-				Namespace: plb.namespace,
-			},
-		}
-		_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(&cm)
+		// TODO - determine best course of action
+		cm, err = plb.CreateConfigMap()
 		if err != nil {
-			klog.Errorf("%v", err)
+			return nil, err
 		}
 	}
-	var svc plndrServices
 
-	if cm.Data == nil {
-		cm.Data = map[string]string{}
-		cm.Data["services"] = svc.updateServices(vip, service.Name, string(service.UID))
-
-	} else {
-		b := cm.Data["services"]
-		json.Unmarshal([]byte(b), &svc)
-		cm.Data["services"] = svc.updateServices(vip, service.Name, string(service.UID))
-	}
-
-	if cm.Annotations == nil {
-		cm.Annotations = map[string]string{}
-	}
-
-	_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
-
+	// Find the services configuraiton in the configMap
+	svc, err := plb.GetServices(cm)
 	if err != nil {
-		klog.Errorf("%v", err)
+		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderConfigMap)
+
+		// TODO best course of action, currently we create a new services config
+		svc = &plndrServices{}
 	}
+
+	newSvc := services{
+		ServiceName: service.Name,
+		UID:         string(service.UID),
+		Vip:         vip,
+	}
+
+	svc.addService(newSvc)
+
+	cm, err = plb.UpdateConfigMap(cm, svc)
+	if err != nil {
+		return nil, err
+	}
+	// // Attempt to retrieve the config map
+	// cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
+	// if err != nil {
+	// 	klog.Errorf("Can't find config Map %s, creating new Map", plb.configMap)
+	// 	cm := v1.ConfigMap{
+	// 		ObjectMeta: metav1.ObjectMeta{
+	// 			Name:      plb.configMap,
+	// 			Namespace: plb.namespace,
+	// 		},
+	// 	}
+	// 	_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(&cm)
+	// 	if err != nil {
+	// 		klog.Errorf("%v", err)
+	// 	}
+	// }
+	// var svc plndrServices
+
+	// if cm.Data == nil {
+	// 	cm.Data = map[string]string{}
+	// 	cm.Data[PlunderServicesKey] = svc.updateServices(vip, service.Name, string(service.UID))
+
+	// } else {
+	// 	b := cm.Data[PlunderServicesKey]
+	// 	json.Unmarshal([]byte(b), &svc)
+	// 	cm.Data[PlunderServicesKey] = svc.updateServices(vip, service.Name, string(service.UID))
+	// }
+
+	// if cm.Annotations == nil {
+	// 	cm.Annotations = map[string]string{}
+	// }
+
+	// _, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
+
+	// if err != nil {
+	// 	klog.Errorf("%v", err)
+	// }
 
 	return &v1.LoadBalancerStatus{
 		Ingress: []v1.LoadBalancerIngress{
@@ -121,19 +190,3 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		},
 	}, nil
 }
-
-func (s *plndrServices) updateServices(vip, name, uid string) string {
-	newsvc := services{
-		Vip:         vip,
-		UID:         uid,
-		ServiceName: name,
-	}
-	s.Services = append(s.Services, newsvc)
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
-// func (plb *plndrLoadBalancerManager) getConfigMap() (*v1.ConfigMap, error) {
-
-// 	return nil, nil
-// }

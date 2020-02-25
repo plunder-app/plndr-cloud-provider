@@ -20,6 +20,9 @@ const (
 
 	//PlunderConfigMap is the default name of the load balancer config Map
 	PlunderConfigMap = "plndr-configmap"
+
+	//PlunderServicesKey is the key in the ConfigMap that has the services configuration
+	PlunderServicesKey = "plndr-services"
 )
 
 func init() {
