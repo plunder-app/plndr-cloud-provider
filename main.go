@@ -40,6 +40,8 @@ func main() {
 
 	command := app.NewCloudControllerManagerCommand()
 
+	command.Flags().BoolVar(&plndrcp.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+
 	// Set static flags for which we know the values.
 	command.Flags().VisitAll(func(fl *pflag.Flag) {
 		var err error

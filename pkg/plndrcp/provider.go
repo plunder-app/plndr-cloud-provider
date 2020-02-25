@@ -9,10 +9,14 @@ import (
 
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	cloudprovider "k8s.io/cloud-provider"
 )
+
+// OutSideCluster allows the controller to be started using a local kubeConfig for testing
+var OutSideCluster bool
 
 const (
 	//ProviderName is the name of the cloud provider
@@ -48,25 +52,29 @@ func newPlunderCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 	if ns == "" {
 		ns = "default"
 	}
-	// This will attempt to load the configuration when running within a POD
-	// cfg, err := rest.InClusterConfig()
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
-	// }
-	// cl, err := kubernetes.NewForConfig(cfg)
+	var cl *kubernetes.Clientset
+	if OutSideCluster == false {
+		// This will attempt to load the configuration when running within a POD
+		cfg, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
+		}
+		cl, err = kubernetes.NewForConfig(cfg)
 
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
-	// }
-	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), ".kube", "config"))
-	if err != nil {
-		panic(err.Error())
-	}
-	cl, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
+		}
+		// use the current context in kubeconfig
+	} else {
+		config, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), ".kube", "config"))
+		if err != nil {
+			panic(err.Error())
+		}
+		cl, err = kubernetes.NewForConfig(config)
 
-	if err != nil {
-		return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
+		if err != nil {
+			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
+		}
 	}
 	return &PlunderCloudProvider{
 		newLoadBalancer(cl, ns, cm, cidr)}, nil
