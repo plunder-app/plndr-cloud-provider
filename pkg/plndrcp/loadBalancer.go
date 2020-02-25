@@ -3,14 +3,12 @@ package plndrcp
 import (
 	"context"
 
+	"github.com/thebsdbox/plndr-cloud-provider/pkg/ipam"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog"
 )
-
-//TODO - this needs replacing with the IPAM code
-const vip = "192.168.0.76"
 
 type plndrServices struct {
 	Services []services `json:"services"`
@@ -18,6 +16,7 @@ type plndrServices struct {
 
 type services struct {
 	Vip         string `json:"vip"`
+	Port        int    `json:"port"`
 	UID         string `json:"uid"`
 	ServiceName string `json:"serviceName"`
 }
@@ -103,7 +102,7 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 
 	// Update the services configuration, by removing the  service
 	updatedSvc := svc.delServiceFromUID(string(service.UID))
-
+	ipam.ReleaseAddress(service.Status.LoadBalancer.Ingress[0].IP)
 	// Update the configMap
 	_, err = plb.UpdateConfigMap(cm, updatedSvc)
 	return err
@@ -111,6 +110,10 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 
 func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.LoadBalancerStatus, error) {
 
+	vip, err := ipam.FindAvailableHost(plb.serviceCidr)
+	if err != nil {
+		return nil, err
+	}
 	// This function reconciles the load balancer state
 	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
 
@@ -133,10 +136,12 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		svc = &plndrServices{}
 	}
 
+	// TODO - manage more than one set of ports
 	newSvc := services{
 		ServiceName: service.Name,
 		UID:         string(service.UID),
 		Vip:         vip,
+		Port:        service.Spec.Ports[0].TargetPort.IntValue(),
 	}
 
 	svc.addService(newSvc)
@@ -145,42 +150,6 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	if err != nil {
 		return nil, err
 	}
-	// // Attempt to retrieve the config map
-	// cm, err := plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
-	// if err != nil {
-	// 	klog.Errorf("Can't find config Map %s, creating new Map", plb.configMap)
-	// 	cm := v1.ConfigMap{
-	// 		ObjectMeta: metav1.ObjectMeta{
-	// 			Name:      plb.configMap,
-	// 			Namespace: plb.namespace,
-	// 		},
-	// 	}
-	// 	_, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(&cm)
-	// 	if err != nil {
-	// 		klog.Errorf("%v", err)
-	// 	}
-	// }
-	// var svc plndrServices
-
-	// if cm.Data == nil {
-	// 	cm.Data = map[string]string{}
-	// 	cm.Data[PlunderServicesKey] = svc.updateServices(vip, service.Name, string(service.UID))
-
-	// } else {
-	// 	b := cm.Data[PlunderServicesKey]
-	// 	json.Unmarshal([]byte(b), &svc)
-	// 	cm.Data[PlunderServicesKey] = svc.updateServices(vip, service.Name, string(service.UID))
-	// }
-
-	// if cm.Annotations == nil {
-	// 	cm.Annotations = map[string]string{}
-	// }
-
-	// _, err = plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
-
-	// if err != nil {
-	// 	klog.Errorf("%v", err)
-	// }
 
 	return &v1.LoadBalancerStatus{
 		Ingress: []v1.LoadBalancerIngress{

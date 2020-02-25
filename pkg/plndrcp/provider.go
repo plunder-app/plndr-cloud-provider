@@ -18,6 +18,9 @@ import (
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
+// CIDR specifies the address range for Virtual IP addresses
+var CIDR string
+
 const (
 	//ProviderName is the name of the cloud provider
 	ProviderName = "plndr"
@@ -52,6 +55,11 @@ func newPlunderCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 	if ns == "" {
 		ns = "default"
 	}
+
+	if cidr == "" {
+		cidr = CIDR
+	}
+
 	var cl *kubernetes.Clientset
 	if OutSideCluster == false {
 		// This will attempt to load the configuration when running within a POD
