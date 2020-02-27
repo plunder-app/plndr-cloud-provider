@@ -16,8 +16,8 @@ Configure `kube-vip` RBAC:
 
 Deploy Kube-VIP:
 
-`https://raw.githubusercontent.com/plunder-app/kube-vip/master/example/pod/kube-vip.yaml`
+`k create -f https://raw.githubusercontent.com/plunder-app/kube-vip/master/example/pod/kube-vip.yaml`
 
 Deploy starboard Daemonset:
 
-`https://raw.githubusercontent.com/plunder-app/starboard/master/examples/daemonset/0.1.yaml`
+`k create -f https://raw.githubusercontent.com/plunder-app/starboard/master/examples/daemonset/0.1.yaml`
