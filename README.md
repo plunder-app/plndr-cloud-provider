@@ -8,6 +8,8 @@ Configure Cloud Provider RBAC:
 
 Deploy Cloud Provider:
 
+*WARNING* By default the cidr is 192.168.0.80/30, to modify this download the manifest and edit the line before applying to the cluster.
+
 `k create -f https://raw.githubusercontent.com/plunder-aap/plndr-cloud-provider/master/example/pod/plndr-cloud-provider.yaml`
 
 Configure `kube-vip` RBAC:
