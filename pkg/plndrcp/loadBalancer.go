@@ -102,7 +102,9 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 
 	// Update the services configuration, by removing the  service
 	updatedSvc := svc.delServiceFromUID(string(service.UID))
-	ipam.ReleaseAddress(service.Status.LoadBalancer.Ingress[0].IP)
+	if len(service.Status.LoadBalancer.Ingress) != 0 {
+		ipam.ReleaseAddress(service.Status.LoadBalancer.Ingress[0].IP)
+	}
 	// Update the configMap
 	_, err = plb.UpdateConfigMap(cm, updatedSvc)
 	return err
@@ -141,7 +143,7 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		ServiceName: service.Name,
 		UID:         string(service.UID),
 		Vip:         vip,
-		Port:        service.Spec.Ports[0].TargetPort.IntValue(),
+		Port:        int(service.Spec.Ports[0].Port),
 	}
 
 	svc.addService(newSvc)

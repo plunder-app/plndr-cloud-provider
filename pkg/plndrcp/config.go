@@ -82,6 +82,9 @@ func (plb *plndrLoadBalancerManager) UpdateConfigMap(cm *v1.ConfigMap, s *plndrS
 	b, _ := json.Marshal(s)
 	cm.Data[PlunderServicesKey] = string(b)
 
+	// TODO - in this first release the CIDR will be static
+	cm.Data["cidr"] = plb.serviceCidr
+
 	// Return results of configMap create
 	return plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
 }
