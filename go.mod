@@ -1,4 +1,4 @@
-module github.com/thebsdbox/plndr-cloud-provider
+module github.com/plunder-app/plndr-cloud-provider
 
 go 1.13
 
