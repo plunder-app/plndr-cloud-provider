@@ -2,7 +2,6 @@ package plndrcp
 
 import (
 	"encoding/json"
-	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +42,6 @@ func (s *plndrServices) updateServices(vip, name, uid string) string {
 func (plb *plndrLoadBalancerManager) GetServices(cm *v1.ConfigMap) (svcs *plndrServices, err error) {
 	// Attempt to retrieve the config map
 	b := cm.Data[PlunderServicesKey]
-	fmt.Printf("%v\n", cm.Data)
 	// Unmarshall raw data into struct
 	err = json.Unmarshal([]byte(b), &svcs)
 	return
