@@ -32,7 +32,7 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugins
 	_ "k8s.io/kubernetes/pkg/cloudprovider/providers"
 
-	"github.com/thebsdbox/plndr-cloud-provider/pkg/plndrcp"
+	"github.com/plunder-app/plndr-cloud-provider/pkg/plndrcp"
 )
 
 func main() {
