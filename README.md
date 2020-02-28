@@ -12,7 +12,7 @@ Deploy Cloud Provider:
 
 By default the VIP / Loadbalancer cidr is 192.168.0.80/30, to modify this download the manifest and edit the line before applying to the cluster.
 
-`k create -f https://raw.githubusercontent.com/plunder-aap/plndr-cloud-provider/master/example/pod/plndr-cloud-provider.yaml`
+`k create -f https://raw.githubusercontent.com/plunder-app/plndr-cloud-provider/master/example/pod/plndr-cloud-provider.yaml`
 
 Configure `kube-vip` RBAC:
 
