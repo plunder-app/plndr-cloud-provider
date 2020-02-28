@@ -105,5 +105,4 @@ spec:
     name: plndr-cloud-provider
     imagePullPolicy: Always
     resources: {}
-  hostNetwork: true
   serviceAccountName: cloud-controller-manager
