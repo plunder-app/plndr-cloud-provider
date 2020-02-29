@@ -24,7 +24,7 @@ type services struct {
 //PlndrLoadBalancer -
 type plndrLoadBalancerManager struct {
 	kubeClient  *kubernetes.Clientset
-	namespace   string
+	nameSpace   string
 	configMap   string
 	serviceCidr string
 }
@@ -32,7 +32,7 @@ type plndrLoadBalancerManager struct {
 func newLoadBalancer(kubeClient *kubernetes.Clientset, ns, cm, serviceCidr string) cloudprovider.LoadBalancer {
 	return &plndrLoadBalancerManager{
 		kubeClient:  kubeClient,
-		namespace:   ns,
+		nameSpace:   ns,
 		configMap:   cm,
 		serviceCidr: serviceCidr}
 }
@@ -51,7 +51,7 @@ func (plb *plndrLoadBalancerManager) EnsureLoadBalancerDeleted(ctx context.Conte
 
 func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
 	// Get the err to be updated
-	cm, err := plb.GetConfigMap()
+	cm, err := plb.GetConfigMap(service.Namespace)
 	if err != nil {
 		return nil, true, nil
 	}
@@ -88,7 +88,7 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 	klog.Infof("deleting service '%s' (%s)", service.Name, service.UID)
 
 	// Get the err to be updated
-	cm, err := plb.GetConfigMap()
+	cm, err := plb.GetConfigMap(service.Namespace)
 	if err != nil {
 		klog.Errorf("The configMap [%s] doensn't exist", PlunderConfigMap)
 		return nil
@@ -120,10 +120,10 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
 
 	// Get the err to be updated
-	cm, err := plb.GetConfigMap()
+	cm, err := plb.GetConfigMap(service.Namespace)
 	if err != nil {
 		// TODO - determine best course of action
-		cm, err = plb.CreateConfigMap()
+		cm, err = plb.CreateConfigMap(service.Namespace)
 		if err != nil {
 			return nil, err
 		}
