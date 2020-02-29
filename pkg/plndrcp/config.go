@@ -47,21 +47,21 @@ func (plb *plndrLoadBalancerManager) GetServices(cm *v1.ConfigMap) (svcs *plndrS
 	return
 }
 
-func (plb *plndrLoadBalancerManager) GetConfigMap() (*v1.ConfigMap, error) {
+func (plb *plndrLoadBalancerManager) GetConfigMap(nm string) (*v1.ConfigMap, error) {
 	// Attempt to retrieve the config map
-	return plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Get(plb.configMap, metav1.GetOptions{})
+	return plb.kubeClient.CoreV1().ConfigMaps(nm).Get(plb.configMap, metav1.GetOptions{})
 }
 
-func (plb *plndrLoadBalancerManager) CreateConfigMap() (*v1.ConfigMap, error) {
+func (plb *plndrLoadBalancerManager) CreateConfigMap(nm string) (*v1.ConfigMap, error) {
 	// Create new configuration map in the correct namespace
 	cm := v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plb.configMap,
-			Namespace: plb.namespace,
+			Namespace: nm,
 		},
 	}
 	// Return results of configMap create
-	return plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Create(&cm)
+	return plb.kubeClient.CoreV1().ConfigMaps(nm).Create(&cm)
 }
 
 func (plb *plndrLoadBalancerManager) UpdateConfigMap(cm *v1.ConfigMap, s *plndrServices) (*v1.ConfigMap, error) {
@@ -84,5 +84,5 @@ func (plb *plndrLoadBalancerManager) UpdateConfigMap(cm *v1.ConfigMap, s *plndrS
 	cm.Data["cidr"] = plb.serviceCidr
 
 	// Return results of configMap create
-	return plb.kubeClient.CoreV1().ConfigMaps(plb.namespace).Update(cm)
+	return plb.kubeClient.CoreV1().ConfigMaps(cm.Namespace).Update(cm)
 }
