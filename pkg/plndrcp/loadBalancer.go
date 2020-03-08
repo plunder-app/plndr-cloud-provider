@@ -2,6 +2,7 @@ package plndrcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/plunder-app/plndr-cloud-provider/pkg/ipam"
 	v1 "k8s.io/api/core/v1"
@@ -23,18 +24,17 @@ type services struct {
 
 //PlndrLoadBalancer -
 type plndrLoadBalancerManager struct {
-	kubeClient  *kubernetes.Clientset
-	nameSpace   string
-	configMap   string
-	serviceCidr string
+	kubeClient *kubernetes.Clientset
+	nameSpace  string
+	configMap  string
+	//serviceCidr string
 }
 
 func newLoadBalancer(kubeClient *kubernetes.Clientset, ns, cm, serviceCidr string) cloudprovider.LoadBalancer {
 	return &plndrLoadBalancerManager{
-		kubeClient:  kubeClient,
-		nameSpace:   ns,
-		configMap:   cm,
-		serviceCidr: serviceCidr}
+		kubeClient: kubeClient,
+		nameSpace:  ns,
+		configMap:  cm}
 }
 
 func (plb *plndrLoadBalancerManager) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (lbs *v1.LoadBalancerStatus, err error) {
@@ -50,11 +50,13 @@ func (plb *plndrLoadBalancerManager) EnsureLoadBalancerDeleted(ctx context.Conte
 }
 
 func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
+
 	// Get the err to be updated
 	cm, err := plb.GetConfigMap(service.Namespace)
 	if err != nil {
 		return nil, true, nil
 	}
+
 	// Find the services configuraiton in the configMap
 	svc, err := plb.GetServices(cm)
 	if err != nil {
@@ -103,7 +105,7 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 	// Update the services configuration, by removing the  service
 	updatedSvc := svc.delServiceFromUID(string(service.UID))
 	if len(service.Status.LoadBalancer.Ingress) != 0 {
-		ipam.ReleaseAddress(service.Status.LoadBalancer.Ingress[0].IP)
+		ipam.ReleaseAddress(service.Namespace, service.Status.LoadBalancer.Ingress[0].IP)
 	}
 	// Update the configMap
 	_, err = plb.UpdateConfigMap(cm, updatedSvc)
@@ -112,15 +114,31 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 
 func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.LoadBalancerStatus, error) {
 
-	vip, err := ipam.FindAvailableHost(plb.serviceCidr)
+	// Get the err to be updated
+	cm, err := plb.GetConfigMap("kube-system")
+	if err != nil {
+		// TODO - determine best course of action
+		cm, err = plb.CreateConfigMap("kube-system")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var vip, cidrRange string
+	var ok bool
+	// Build cidr key
+	cidrKey := fmt.Sprintf("cidr-%s", service.Namespace)
+	if cidrRange, ok = cm.Data[cidrKey]; !ok {
+		return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.configMap)
+
+	}
+	vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
 	if err != nil {
 		return nil, err
 	}
-	// This function reconciles the load balancer state
-	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
 
-	// Get the err to be updated
-	cm, err := plb.GetConfigMap(service.Namespace)
+	// Retrieve the kube-vip configuration map
+	cm, err = plb.GetConfigMap(service.Namespace)
 	if err != nil {
 		// TODO - determine best course of action
 		cm, err = plb.CreateConfigMap(service.Namespace)
@@ -128,6 +146,9 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 			return nil, err
 		}
 	}
+
+	// This function reconciles the load balancer state
+	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
 
 	// Find the services configuraiton in the configMap
 	svc, err := plb.GetServices(cm)
