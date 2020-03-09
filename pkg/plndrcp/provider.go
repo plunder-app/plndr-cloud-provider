@@ -18,15 +18,15 @@ import (
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
-// CIDR specifies the address range for Virtual IP addresses
-var CIDR string
-
 const (
 	//ProviderName is the name of the cloud provider
 	ProviderName = "plndr"
 
-	//PlunderConfigMap is the default name of the load balancer config Map
-	PlunderConfigMap = "plndr-configmap"
+	//PlunderCloudConfig is the default name of the load balancer config Map
+	PlunderCloudConfig = "plndr"
+
+	//PlunderClientConfig is the default name of the load balancer config Map
+	PlunderClientConfig = "plndr"
 
 	//PlunderServicesKey is the key in the ConfigMap that has the services configuration
 	PlunderServicesKey = "plndr-services"
@@ -49,15 +49,11 @@ func newPlunderCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 	cidr := os.Getenv("PLNDR_SERVICE_CIDR")
 
 	if cm == "" {
-		cm = PlunderConfigMap
+		cm = PlunderCloudConfig
 	}
 
 	if ns == "" {
 		ns = "default"
-	}
-
-	if cidr == "" {
-		cidr = CIDR
 	}
 
 	var cl *kubernetes.Clientset

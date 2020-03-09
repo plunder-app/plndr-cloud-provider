@@ -24,17 +24,16 @@ type services struct {
 
 //PlndrLoadBalancer -
 type plndrLoadBalancerManager struct {
-	kubeClient *kubernetes.Clientset
-	nameSpace  string
-	configMap  string
-	//serviceCidr string
+	kubeClient     *kubernetes.Clientset
+	nameSpace      string
+	cloudConfigMap string
 }
 
 func newLoadBalancer(kubeClient *kubernetes.Clientset, ns, cm, serviceCidr string) cloudprovider.LoadBalancer {
 	return &plndrLoadBalancerManager{
-		kubeClient: kubeClient,
-		nameSpace:  ns,
-		configMap:  cm}
+		kubeClient:     kubeClient,
+		nameSpace:      ns,
+		cloudConfigMap: cm}
 }
 
 func (plb *plndrLoadBalancerManager) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (lbs *v1.LoadBalancerStatus, err error) {
@@ -51,8 +50,8 @@ func (plb *plndrLoadBalancerManager) EnsureLoadBalancerDeleted(ctx context.Conte
 
 func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
 
-	// Get the err to be updated
-	cm, err := plb.GetConfigMap(service.Namespace)
+	// Retrieve the kube-vip configuration from it's namespace
+	cm, err := plb.GetConfigMap(PlunderClientConfig, service.Namespace)
 	if err != nil {
 		return nil, true, nil
 	}
@@ -89,16 +88,16 @@ func getDefaultLoadBalancerName(service *v1.Service) string {
 func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) error {
 	klog.Infof("deleting service '%s' (%s)", service.Name, service.UID)
 
-	// Get the err to be updated
-	cm, err := plb.GetConfigMap(service.Namespace)
+	// Get the kube-vip (client) configuration from it's namespace
+	cm, err := plb.GetConfigMap(PlunderClientConfig, service.Namespace)
 	if err != nil {
-		klog.Errorf("The configMap [%s] doensn't exist", PlunderConfigMap)
+		klog.Errorf("The configMap [%s] doensn't exist", PlunderClientConfig)
 		return nil
 	}
 	// Find the services configuraiton in the configMap
 	svc, err := plb.GetServices(cm)
 	if err != nil {
-		klog.Errorf("The service [%s] in configMap [%s] doensn't exist", service.Name, PlunderConfigMap)
+		klog.Errorf("The service [%s] in configMap [%s] doensn't exist", service.Name, PlunderClientConfig)
 		return nil
 	}
 
@@ -114,11 +113,11 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 
 func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.LoadBalancerStatus, error) {
 
-	// Get the err to be updated
-	cm, err := plb.GetConfigMap("kube-system")
+	// Get the clound controller configuration map
+	cm, err := plb.GetConfigMap(PlunderCloudConfig, "kube-system")
 	if err != nil {
-		// TODO - determine best course of action
-		cm, err = plb.CreateConfigMap("kube-system")
+		// TODO - determine best course of action, create one if it doesn't exist
+		cm, err = plb.CreateConfigMap(PlunderCloudConfig, "kube-system")
 		if err != nil {
 			return nil, err
 		}
@@ -126,10 +125,10 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 
 	var vip, cidrRange string
 	var ok bool
-	// Build cidr key
+	// Build cidr key for this service
 	cidrKey := fmt.Sprintf("cidr-%s", service.Namespace)
 	if cidrRange, ok = cm.Data[cidrKey]; !ok {
-		return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.configMap)
+		return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.cloudConfigMap)
 
 	}
 	vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
@@ -138,10 +137,10 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	}
 
 	// Retrieve the kube-vip configuration map
-	cm, err = plb.GetConfigMap(service.Namespace)
+	cm, err = plb.GetConfigMap(PlunderClientConfig, service.Namespace)
 	if err != nil {
 		// TODO - determine best course of action
-		cm, err = plb.CreateConfigMap(service.Namespace)
+		cm, err = plb.CreateConfigMap(PlunderClientConfig, service.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +152,7 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	// Find the services configuraiton in the configMap
 	svc, err := plb.GetServices(cm)
 	if err != nil {
-		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderConfigMap)
+		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderClientConfig)
 
 		// TODO best course of action, currently we create a new services config
 		svc = &plndrServices{}
