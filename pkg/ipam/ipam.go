@@ -40,6 +40,9 @@ func FindAvailableHost(namespace, cidr string) (string, error) {
 					return Manager[x].hosts[y], nil
 				}
 			}
+			// If we have found the manager for this namespace and not returned an address then we've expired the range
+			return "", fmt.Errorf("No addresses available in [%s] range [%s]", namespace, cidr)
+
 		}
 	}
 	ah, err := buildHosts(cidr)
