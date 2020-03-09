@@ -32,12 +32,12 @@ func FindAvailableHost(namespace, cidr string) (string, error) {
 				Manager[x].hosts = ah
 			}
 			// TODO - currently we search (incrementally) through the list of hosts
-			for x := range Manager[x].hosts {
+			for y := range Manager[x].hosts {
 				// find a host that is marked false (i.e. unused)
-				if Manager[x].addressManager[Manager[x].hosts[x]] == false {
+				if Manager[x].addressManager[Manager[x].hosts[y]] == false {
 					// Mark it to used
-					Manager[x].addressManager[Manager[x].hosts[x]] = true
-					return Manager[x].hosts[x], nil
+					Manager[x].addressManager[Manager[x].hosts[y]] = true
+					return Manager[x].hosts[y], nil
 				}
 			}
 		}
