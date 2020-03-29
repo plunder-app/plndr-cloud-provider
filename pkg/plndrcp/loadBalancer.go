@@ -18,6 +18,7 @@ type plndrServices struct {
 type services struct {
 	Vip         string `json:"vip"`
 	Port        int    `json:"port"`
+	Type        string `json:"type"`
 	UID         string `json:"uid"`
 	ServiceName string `json:"serviceName"`
 }
@@ -162,6 +163,7 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	newSvc := services{
 		ServiceName: service.Name,
 		UID:         string(service.UID),
+		Type:        string(service.Spec.Ports[0].Protocol),
 		Vip:         vip,
 		Port:        int(service.Spec.Ports[0].Port),
 	}
