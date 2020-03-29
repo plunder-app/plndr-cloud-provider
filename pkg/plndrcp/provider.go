@@ -81,7 +81,8 @@ func newPlunderCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 		}
 	}
 	return &PlunderCloudProvider{
-		newLoadBalancer(cl, ns, cm, cidr)}, nil
+		lb: newLoadBalancer(cl, ns, cm, cidr),
+	}, nil
 }
 
 // Initialize - starts the clound-provider controller
@@ -100,4 +101,9 @@ func (p *PlunderCloudProvider) Initialize(clientBuilder cloudprovider.Controller
 // LoadBalancer returns a loadbalancer interface. Also returns true if the interface is supported, false otherwise.
 func (p *PlunderCloudProvider) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	return p.lb, true
+}
+
+// ProviderName returns the cloud provider ID.
+func (p *PlunderCloudProvider) ProviderName() string {
+	return ProviderName
 }
