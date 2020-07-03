@@ -124,6 +124,32 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		}
 	}
 
+	// This function reconciles the load balancer state
+	klog.Infof("syncing service '%s' (%s) with", service.Name, service.UID)
+
+	// Find the services configuraiton in the configMap
+	svc, err := plb.GetServices(cm)
+	if err != nil {
+		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderClientConfig)
+
+		// TODO best course of action, currently we create a new services config
+		svc = &plndrServices{}
+	}
+
+	// Check for existing configuration
+
+	existing := svc.findService(string(service.UID))
+	if existing != nil {
+		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
+		return &v1.LoadBalancerStatus{
+			Ingress: []v1.LoadBalancerIngress{
+				{
+					IP: existing.Vip,
+				},
+			},
+		}, nil
+	}
+
 	var vip, cidrRange string
 	var ok bool
 	// Build cidr key for this service
@@ -145,18 +171,6 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// This function reconciles the load balancer state
-	klog.Infof("syncing service '%s' (%s) with vip: %s", service.Name, service.UID, vip)
-
-	// Find the services configuraiton in the configMap
-	svc, err := plb.GetServices(cm)
-	if err != nil {
-		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderClientConfig)
-
-		// TODO best course of action, currently we create a new services config
-		svc = &plndrServices{}
 	}
 
 	// TODO - manage more than one set of ports

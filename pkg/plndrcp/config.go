@@ -13,6 +13,15 @@ func (s *plndrServices) addService(newSvc services) {
 	s.Services = append(s.Services, newSvc)
 }
 
+func (s *plndrServices) findService(UID string) *services {
+	for x := range s.Services {
+		if s.Services[x].UID == UID {
+			return &s.Services[x]
+		}
+	}
+	return nil
+}
+
 func (s *plndrServices) delServiceFromUID(UID string) *plndrServices {
 	// New Services list
 	updatedServices := &plndrServices{}
