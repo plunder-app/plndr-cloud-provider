@@ -6,7 +6,7 @@ TARGET := plndr-cloud-provider
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSION := 0.1.3
+VERSION := 0.1.4
 BUILD := `git rev-parse HEAD`
 
 # Operating System Default (LINUX)
@@ -43,6 +43,12 @@ uninstall: clean
 
 fmt:
 	@gofmt -l -w $(SRC)
+
+
+# For faster local builds
+dockerx86:
+	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New Multi Architecture Docker image created
 
 docker:
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
