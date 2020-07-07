@@ -41,7 +41,7 @@ spec:
   containers:
   - command:
     - /plndr-cloud-provider
-    image: plndr/plndr-cloud-provider:0.1.3
+    image: plndr/plndr-cloud-provider:0.1.4
     name: plndr-cloud-provider
     imagePullPolicy: Always
     resources: {}

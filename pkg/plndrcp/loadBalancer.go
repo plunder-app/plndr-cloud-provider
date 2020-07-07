@@ -158,9 +158,16 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.cloudConfigMap)
 
 	}
-	vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
-	if err != nil {
-		return nil, err
+
+	// Check if we're not explicitly specifying an address to use, if not then use iPAM to find an address
+	if service.Spec.LoadBalancerIP == "" {
+		vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// An IP address is specified, we need to validate it and then allocate it
+		vip = service.Spec.LoadBalancerIP
 	}
 
 	// Retrieve the kube-vip configuration map
