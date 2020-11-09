@@ -57,7 +57,7 @@ func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, cluste
 		return nil, true, nil
 	}
 
-	// Find the services configuraiton in the configMap
+	// Find the services configuration in the configMap
 	svc, err := plb.GetServices(cm)
 	if err != nil {
 		return nil, false, err
@@ -175,6 +175,16 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	existing := svc.findService(string(service.UID))
 	if existing != nil {
 		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
+		// If this is 0.0.0.0 then it's a DHCP lease and we need to return that not the 0.0.0.0
+		if existing.Vip == "0.0.0.0" {
+			return &v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{
+					{
+						IP: vip,
+					},
+				},
+			}, nil
+		}
 		return &v1.LoadBalancerStatus{
 			Ingress: []v1.LoadBalancerIngress{
 				{
