@@ -117,6 +117,7 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	// Get the clound controller configuration map
 	cm, err := plb.GetConfigMap(PlunderCloudConfig, "kube-system")
 	if err != nil {
+		klog.Errorf("Unable to retrieve services from configMap [%s] in kube-system", PlunderClientConfig)
 		// TODO - determine best course of action, create one if it doesn't exist
 		cm, err = plb.CreateConfigMap(PlunderCloudConfig, "kube-system")
 		if err != nil {
@@ -124,41 +125,18 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		}
 	}
 
-	// This function reconciles the load balancer state
-	klog.Infof("syncing service '%s' (%s) with", service.Name, service.UID)
-
-	// Find the services configuraiton in the configMap
-	svc, err := plb.GetServices(cm)
-	if err != nil {
-		klog.Errorf("Unable to retrieve services from configMap [%s]", PlunderClientConfig)
-
-		// TODO best course of action, currently we create a new services config
-		svc = &plndrServices{}
-	}
-
-	// Check for existing configuration
-
-	existing := svc.findService(string(service.UID))
-	if existing != nil {
-		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
-		return &v1.LoadBalancerStatus{
-			Ingress: []v1.LoadBalancerIngress{
-				{
-					IP: existing.Vip,
-				},
-			},
-		}, nil
-	}
-
 	var vip, cidrRange string
 	var ok bool
 	// Build cidr key for this service
 	cidrKey := fmt.Sprintf("cidr-%s", service.Namespace)
 	if cidrRange, ok = cm.Data[cidrKey]; !ok {
-		return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.cloudConfigMap)
-
+		if cidrRange, ok = cm.Data["cidr-global"]; !ok {
+			return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.cloudConfigMap)
+		}
+		klog.Infof("Taking address from [cidr-global] pool")
+	} else {
+		klog.Infof("Taking address from [%s] pool", cidrKey)
 	}
-
 	// Check if we're not explicitly specifying an address to use, if not then use iPAM to find an address
 	if service.Spec.LoadBalancerIP == "" {
 		vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
@@ -178,6 +156,32 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// This function reconciles the load balancer state
+	klog.Infof("syncing service '%s' (%s)", service.Name, service.UID)
+
+	// Find the services configuraiton in the configMap
+	svc, err := plb.GetServices(cm)
+	if err != nil {
+		klog.Errorf("Unable to retrieve services from configMap [%s], [%s]", PlunderClientConfig, err.Error())
+
+		// TODO best course of action, currently we create a new services config
+		svc = &plndrServices{}
+	}
+
+	// Check for existing configuration
+
+	existing := svc.findService(string(service.UID))
+	if existing != nil {
+		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
+		return &v1.LoadBalancerStatus{
+			Ingress: []v1.LoadBalancerIngress{
+				{
+					IP: existing.Vip,
+				},
+			},
+		}, nil
 	}
 
 	// TODO - manage more than one set of ports
