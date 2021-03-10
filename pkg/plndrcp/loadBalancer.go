@@ -66,13 +66,15 @@ func (plb *plndrLoadBalancerManager) GetLoadBalancer(ctx context.Context, cluste
 
 	for x := range svc.Services {
 		if svc.Services[x].UID == string(service.UID) {
-			return &v1.LoadBalancerStatus{
-				Ingress: []v1.LoadBalancerIngress{
-					{
-						IP: svc.Services[x].Vip,
-					},
-				},
-			}, true, nil
+			return &service.Status.LoadBalancer, true, nil
+
+			// return &v1.LoadBalancerStatus{
+			// 	Ingress: []v1.LoadBalancerIngress{
+			// 		{
+			// 			IP: svc.Services[x].Vip,
+			// 		},
+			// 	},
+			// }, true, nil
 		}
 	}
 	return nil, false, nil
@@ -158,20 +160,21 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	existing := svc.findService(string(service.UID))
 	if existing != nil {
 		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
+		return &service.Status.LoadBalancer, nil
 
 		// If this is 0.0.0.0 then it's a DHCP lease and we need to return that not the 0.0.0.0
-		if existing.Vip == "0.0.0.0" {
-			return &service.Status.LoadBalancer, nil
-		}
+		// if existing.Vip == "0.0.0.0" {
+		// 	return &service.Status.LoadBalancer, nil
+		// }
 
-		//
-		return &v1.LoadBalancerStatus{
-			Ingress: []v1.LoadBalancerIngress{
-				{
-					IP: existing.Vip,
-				},
-			},
-		}, nil
+		// //
+		// return &v1.LoadBalancerStatus{
+		// 	Ingress: []v1.LoadBalancerIngress{
+		// 		{
+		// 			IP: existing.Vip,
+		// 		},
+		// 	},
+		// }, nil
 	}
 
 	var vip string
@@ -195,15 +198,14 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		Port:        int(service.Spec.Ports[0].Port),
 	}
 
+	klog.Infof("Updating service [%s], with load balancer address [%s]", service.Name, service.Spec.LoadBalancerIP)
 	service.Spec.LoadBalancerIP = vip
-
-	updatedService, err := plb.kubeClient.CoreV1().Services(service.Namespace).Update(service)
-	klog.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
+	_, err = plb.kubeClient.CoreV1().Services(service.Namespace).Update(service)
 	if err != nil {
 		// release the address internally as we failed to update service
-		err = ipam.ReleaseAddress(service.Namespace, vip)
-		if err != nil {
-			klog.Errorln(err)
+		ipamerr := ipam.ReleaseAddress(service.Namespace, vip)
+		if ipamerr != nil {
+			klog.Errorln(ipamerr)
 		}
 		return nil, fmt.Errorf("Error updating Service Spec [%s] : %v", service.Name, err)
 	}
@@ -214,14 +216,15 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	if err != nil {
 		return nil, err
 	}
+	return &service.Status.LoadBalancer, nil
 
-	return &v1.LoadBalancerStatus{
-		Ingress: []v1.LoadBalancerIngress{
-			{
-				IP: vip,
-			},
-		},
-	}, nil
+	// return &v1.LoadBalancerStatus{
+	// 	Ingress: []v1.LoadBalancerIngress{
+	// 		{
+	// 			IP: vip,
+	// 		},
+	// 	},
+	// }, nil
 }
 
 func discoverAddress(cm *v1.ConfigMap, namespace, configMapName string) (vip string, err error) {
