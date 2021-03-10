@@ -34,7 +34,8 @@ func newLoadBalancer(kubeClient *kubernetes.Clientset, ns, cm, serviceCidr strin
 	return &plndrLoadBalancerManager{
 		kubeClient:     kubeClient,
 		nameSpace:      ns,
-		cloudConfigMap: cm}
+		cloudConfigMap: cm,
+	}
 }
 
 func (plb *plndrLoadBalancerManager) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (lbs *v1.LoadBalancerStatus, err error) {
@@ -86,6 +87,7 @@ func (plb *plndrLoadBalancerManager) GetLoadBalancerName(_ context.Context, clus
 func getDefaultLoadBalancerName(service *v1.Service) string {
 	return cloudprovider.DefaultLoadBalancerName(service)
 }
+
 func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) error {
 	klog.Infof("deleting service '%s' (%s)", service.Name, service.UID)
 
@@ -125,28 +127,25 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		}
 	}
 
-	var vip, cidrRange string
-	var ok bool
-	// Build cidr key for this service
-	cidrKey := fmt.Sprintf("cidr-%s", service.Namespace)
-	if cidrRange, ok = cm.Data[cidrKey]; !ok {
-		if cidrRange, ok = cm.Data["cidr-global"]; !ok {
-			return nil, fmt.Errorf("No cidr configuration for namespace [%s] exists in key [%s] configmap [%s]", service.Namespace, cidrKey, plb.cloudConfigMap)
-		}
-		klog.Infof("Taking address from [cidr-global] pool")
-	} else {
-		klog.Infof("Taking address from [%s] pool", cidrKey)
-	}
-	// Check if we're not explicitly specifying an address to use, if not then use iPAM to find an address
-	if service.Spec.LoadBalancerIP == "" {
-		vip, err = ipam.FindAvailableHost(service.Namespace, cidrRange)
-		if err != nil {
-			return nil, err
-		}
-	} else {
+	var vip string
+
+	if service.Spec.LoadBalancerIP != "" {
 		// An IP address is specified, we need to validate it and then allocate it
 		vip = service.Spec.LoadBalancerIP
+	} else {
+		vip, err = discoverAddress(cm, service.Namespace, plb.cloudConfigMap)
+
 	}
+
+	// // Check if we're not explicitly specifying an address to use, if not then use iPAM to find an address
+	// if service.Spec.LoadBalancerIP == "" {
+	// 	vip, err = ipam.FindAvailableHost(service.Namespace, cidr)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// } else {
+
+	// }
 
 	// Retrieve the kube-vip configuration map
 	cm, err = plb.GetConfigMap(PlunderClientConfig, service.Namespace)
@@ -203,6 +202,14 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		Port:        int(service.Spec.Ports[0].Port),
 	}
 
+	service.Spec.LoadBalancerIP = vip
+
+	updatedService, err := plb.kubeClient.CoreV1().Services(service.Namespace).Update(service)
+	klog.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
+	if err != nil {
+		return nil, fmt.Errorf("Error updating Service Spec [%s] : %v", service.Name, err)
+	}
+
 	svc.addService(newSvc)
 
 	cm, err = plb.UpdateConfigMap(cm, svc)
@@ -217,4 +224,46 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 			},
 		},
 	}, nil
+}
+
+func discoverAddress(cm *v1.ConfigMap, namespace, configMapName string) (vip string, err error) {
+	var cidr, ipRange string
+	var ok bool
+
+	// Find Cidr
+	cidrKey := fmt.Sprintf("cidr-%s", namespace)
+	if cidr, ok = cm.Data[cidrKey]; !ok {
+		if cidr, ok = cm.Data["cidr-global"]; !ok {
+			klog.Info(fmt.Errorf("No cidr config for namespace [%s] exists in key [%s] configmap [%s]", namespace, cidrKey, configMapName))
+		}
+		klog.Infof("Taking address from [cidr-global] pool")
+	} else {
+		klog.Infof("Taking address from [%s] pool", cidrKey)
+	}
+	if ok {
+		vip, err = ipam.FindAvailableHostFromCidr(namespace, cidr)
+		if err != nil {
+			return "", err
+		}
+		return
+	}
+
+	// Find Range
+	rangeKey := fmt.Sprintf("range-%s", namespace)
+	if ipRange, ok = cm.Data[rangeKey]; !ok {
+		if ipRange, ok = cm.Data["range-global"]; !ok {
+			klog.Info(fmt.Errorf("No range config for namespace [%s] exists in key [%s] configmap [%s]", namespace, rangeKey, configMapName))
+		}
+		klog.Infof("Taking address from [range-global] pool")
+	} else {
+		klog.Infof("Taking address from [%s] pool", rangeKey)
+	}
+	if ok {
+		vip, err = ipam.FindAvailableHostFromRange(namespace, ipRange)
+		if err != nil {
+			return "", err
+		}
+		return
+	}
+	return "", nil
 }
