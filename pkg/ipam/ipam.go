@@ -137,25 +137,37 @@ func ReleaseAddress(namespace, address string) error {
 
 // buildHostsFromCidr - Builds a list of addresses in the cidr
 func buildHostsFromCidr(cidr string) ([]string, error) {
-	ip, ipnet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return nil, err
-	}
-
 	var ips []string
-	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
-		ips = append(ips, ip.String())
+
+	// Split the ipranges (comma seperated)
+	cidrs := strings.Split(cidr, ",")
+	if len(cidrs) == 0 {
+		return nil, fmt.Errorf("Unable to parse IP cidrs [%s]", cidr)
 	}
 
-	// remove network address and broadcast address
-	lenIPs := len(ips)
-	switch {
-	case lenIPs < 2:
-		return ips, nil
+	for x := range cidrs {
 
-	default:
-		return ips[1 : len(ips)-1], nil
+		ip, ipnet, err := net.ParseCIDR(cidrs[x])
+		if err != nil {
+			return nil, err
+		}
+
+		var cidrips []string
+		for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
+			cidrips = append(cidrips, ip.String())
+		}
+
+		// remove network address and broadcast address
+		lenIPs := len(cidrips)
+		switch {
+		case lenIPs < 2:
+			ips = append(ips, cidrips...)
+
+		default:
+			ips = append(ips, cidrips[1:len(cidrips)-1]...)
+		}
 	}
+	return removeDuplicateAddresses(ips), nil
 }
 
 // buildHostsFromRange - Builds a list of addresses in the cidr
