@@ -107,7 +107,10 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 	// Update the services configuration, by removing the  service
 	updatedSvc := svc.delServiceFromUID(string(service.UID))
 	if len(service.Status.LoadBalancer.Ingress) != 0 {
-		ipam.ReleaseAddress(service.Namespace, service.Status.LoadBalancer.Ingress[0].IP)
+		err = ipam.ReleaseAddress(service.Namespace, service.Spec.LoadBalancerIP)
+		if err != nil {
+			klog.Errorln(err)
+		}
 	}
 	// Update the configMap
 	_, err = plb.UpdateConfigMap(cm, updatedSvc)
@@ -117,41 +120,22 @@ func (plb *plndrLoadBalancerManager) deleteLoadBalancer(service *v1.Service) err
 func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.LoadBalancerStatus, error) {
 
 	// Get the clound controller configuration map
-	cm, err := plb.GetConfigMap(PlunderCloudConfig, "kube-system")
+	controllerCM, err := plb.GetConfigMap(PlunderCloudConfig, "kube-system")
 	if err != nil {
-		klog.Errorf("Unable to retrieve services from configMap [%s] in kube-system", PlunderClientConfig)
+		klog.Errorf("Unable to retrieve kube-vip ipam config from configMap [%s] in kube-system", PlunderClientConfig)
 		// TODO - determine best course of action, create one if it doesn't exist
-		cm, err = plb.CreateConfigMap(PlunderCloudConfig, "kube-system")
+		controllerCM, err = plb.CreateConfigMap(PlunderCloudConfig, "kube-system")
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	var vip string
-
-	if service.Spec.LoadBalancerIP != "" {
-		// An IP address is specified, we need to validate it and then allocate it
-		vip = service.Spec.LoadBalancerIP
-	} else {
-		vip, err = discoverAddress(cm, service.Namespace, plb.cloudConfigMap)
-
-	}
-
-	// // Check if we're not explicitly specifying an address to use, if not then use iPAM to find an address
-	// if service.Spec.LoadBalancerIP == "" {
-	// 	vip, err = ipam.FindAvailableHost(service.Namespace, cidr)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// } else {
-
-	// }
-
 	// Retrieve the kube-vip configuration map
-	cm, err = plb.GetConfigMap(PlunderClientConfig, service.Namespace)
+	namespaceCM, err := plb.GetConfigMap(PlunderClientConfig, service.Namespace)
 	if err != nil {
+		klog.Errorf("Unable to retrieve kube-vip service cache from configMap [%s] in [%s]", PlunderClientConfig, service.Namespace)
 		// TODO - determine best course of action
-		cm, err = plb.CreateConfigMap(PlunderClientConfig, service.Namespace)
+		namespaceCM, err = plb.CreateConfigMap(PlunderClientConfig, service.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +145,7 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	klog.Infof("syncing service '%s' (%s)", service.Name, service.UID)
 
 	// Find the services configuraiton in the configMap
-	svc, err := plb.GetServices(cm)
+	svc, err := plb.GetServices(namespaceCM)
 	if err != nil {
 		klog.Errorf("Unable to retrieve services from configMap [%s], [%s]", PlunderClientConfig, err.Error())
 
@@ -174,16 +158,13 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	existing := svc.findService(string(service.UID))
 	if existing != nil {
 		klog.Infof("found existing service '%s' (%s) with vip %s", service.Name, service.UID, existing.Vip)
+
 		// If this is 0.0.0.0 then it's a DHCP lease and we need to return that not the 0.0.0.0
 		if existing.Vip == "0.0.0.0" {
-			return &v1.LoadBalancerStatus{
-				Ingress: []v1.LoadBalancerIngress{
-					{
-						IP: vip,
-					},
-				},
-			}, nil
+			return &service.Status.LoadBalancer, nil
 		}
+
+		//
 		return &v1.LoadBalancerStatus{
 			Ingress: []v1.LoadBalancerIngress{
 				{
@@ -191,6 +172,18 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 				},
 			},
 		}, nil
+	}
+
+	var vip string
+
+	if service.Spec.LoadBalancerIP != "" {
+		// An IP address is specified, we need to validate it and then allocate it
+		vip = service.Spec.LoadBalancerIP
+	} else {
+		vip, err = discoverAddress(controllerCM, service.Namespace, plb.cloudConfigMap)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// TODO - manage more than one set of ports
@@ -207,12 +200,17 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 	updatedService, err := plb.kubeClient.CoreV1().Services(service.Namespace).Update(service)
 	klog.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
 	if err != nil {
+		// release the address internally as we failed to update service
+		err = ipam.ReleaseAddress(service.Namespace, vip)
+		if err != nil {
+			klog.Errorln(err)
+		}
 		return nil, fmt.Errorf("Error updating Service Spec [%s] : %v", service.Name, err)
 	}
 
 	svc.addService(newSvc)
 
-	cm, err = plb.UpdateConfigMap(cm, svc)
+	namespaceCM, err = plb.UpdateConfigMap(namespaceCM, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -232,11 +230,15 @@ func discoverAddress(cm *v1.ConfigMap, namespace, configMapName string) (vip str
 
 	// Find Cidr
 	cidrKey := fmt.Sprintf("cidr-%s", namespace)
+	// Lookup current namespace
 	if cidr, ok = cm.Data[cidrKey]; !ok {
+		klog.Info(fmt.Errorf("No cidr config for namespace [%s] exists in key [%s] configmap [%s]", namespace, cidrKey, configMapName))
+		// Lookup global cidr configmap data
 		if cidr, ok = cm.Data["cidr-global"]; !ok {
-			klog.Info(fmt.Errorf("No cidr config for namespace [%s] exists in key [%s] configmap [%s]", namespace, cidrKey, configMapName))
+			klog.Info(fmt.Errorf("No global cidr config exists [cidr-global]"))
+		} else {
+			klog.Infof("Taking address from [cidr-global] pool")
 		}
-		klog.Infof("Taking address from [cidr-global] pool")
 	} else {
 		klog.Infof("Taking address from [%s] pool", cidrKey)
 	}
@@ -250,20 +252,24 @@ func discoverAddress(cm *v1.ConfigMap, namespace, configMapName string) (vip str
 
 	// Find Range
 	rangeKey := fmt.Sprintf("range-%s", namespace)
+	// Lookup current namespace
 	if ipRange, ok = cm.Data[rangeKey]; !ok {
+		klog.Info(fmt.Errorf("No range config for namespace [%s] exists in key [%s] configmap [%s]", namespace, rangeKey, configMapName))
+		// Lookup global range configmap data
 		if ipRange, ok = cm.Data["range-global"]; !ok {
-			klog.Info(fmt.Errorf("No range config for namespace [%s] exists in key [%s] configmap [%s]", namespace, rangeKey, configMapName))
+			klog.Info(fmt.Errorf("No global range config exists [range-global]"))
+		} else {
+			klog.Infof("Taking address from [range-global] pool")
 		}
-		klog.Infof("Taking address from [range-global] pool")
 	} else {
 		klog.Infof("Taking address from [%s] pool", rangeKey)
 	}
 	if ok {
 		vip, err = ipam.FindAvailableHostFromRange(namespace, ipRange)
 		if err != nil {
-			return "", err
+			return vip, err
 		}
 		return
 	}
-	return "", nil
+	return "", fmt.Errorf("No IP address ranges could be found either range-global or range-<namespace>")
 }

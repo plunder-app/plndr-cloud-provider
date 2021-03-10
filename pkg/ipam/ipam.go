@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"k8s.io/klog"
 )
 
 // Manager - handles the addresses for each namespace/vip
@@ -25,7 +27,7 @@ func FindAvailableHostFromRange(namespace, ipRange string) (string, error) {
 	for x := range Manager {
 		if Manager[x].namespace == namespace {
 			// Check that the address range is the same
-			if Manager[x].cidr != ipRange {
+			if Manager[x].ipRange != ipRange {
 				// If not rebuild the available hosts
 				ah, err := buildHostsFromRange(ipRange)
 				if err != nil {
@@ -128,7 +130,6 @@ func ReleaseAddress(namespace, address string) error {
 		if Manager[x].namespace == namespace {
 			Manager[x].addressManager[address] = false
 			return nil
-
 		}
 	}
 	return fmt.Errorf("Unable to release address [%s] in namespace [%s]", address, namespace)
@@ -189,7 +190,7 @@ func buildHostsFromRange(ipRangeString string) ([]string, error) {
 			startRange[3]++
 			ips = append(ips, startRange.String())
 		}
-
+		klog.Infof("Rebuilding addresse cache, [%d] addresses exist", len(ips))
 	}
 	return removeDuplicateAddresses(ips), nil
 }
