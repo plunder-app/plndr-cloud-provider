@@ -177,13 +177,8 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		// }, nil
 	}
 
-	var vip string
-
-	if service.Spec.LoadBalancerIP != "" {
-		// An IP address is specified, we need to validate it and then allocate it
-		vip = service.Spec.LoadBalancerIP
-	} else {
-		vip, err = discoverAddress(controllerCM, service.Namespace, plb.cloudConfigMap)
+	if service.Spec.LoadBalancerIP == "" {
+		service.Spec.LoadBalancerIP, err = discoverAddress(controllerCM, service.Namespace, plb.cloudConfigMap)
 		if err != nil {
 			return nil, err
 		}
@@ -194,16 +189,15 @@ func (plb *plndrLoadBalancerManager) syncLoadBalancer(service *v1.Service) (*v1.
 		ServiceName: service.Name,
 		UID:         string(service.UID),
 		Type:        string(service.Spec.Ports[0].Protocol),
-		Vip:         vip,
+		Vip:         service.Spec.LoadBalancerIP,
 		Port:        int(service.Spec.Ports[0].Port),
 	}
 
 	klog.Infof("Updating service [%s], with load balancer address [%s]", service.Name, service.Spec.LoadBalancerIP)
-	service.Spec.LoadBalancerIP = vip
 	_, err = plb.kubeClient.CoreV1().Services(service.Namespace).Update(service)
 	if err != nil {
 		// release the address internally as we failed to update service
-		ipamerr := ipam.ReleaseAddress(service.Namespace, vip)
+		ipamerr := ipam.ReleaseAddress(service.Namespace, service.Spec.LoadBalancerIP)
 		if ipamerr != nil {
 			klog.Errorln(ipamerr)
 		}
